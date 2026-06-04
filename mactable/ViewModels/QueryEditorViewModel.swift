@@ -16,8 +16,23 @@ final class QueryEditorViewModel: ObservableObject {
     @Published var safeMode: Bool = true
     @Published var pendingDestructiveSQL: String?
 
+    /// Phase 3: shared queue for cell-edit mutations buffered under Safe Mode.
+    let mutationsQueue = MutationsQueue()
+
+    /// Phase 4: in-memory time-travel ring storing the last N executed
+    /// queries together with their result snapshot.
+    @Published private(set) var history: [QueryHistoryEntry] = []
+    @Published var historyIndex: Int? = nil
+
+    /// Phase 3: most recently queried table name and inferred primary key.
+    /// Used by the grid for safe inline edits. Updated whenever the user
+    /// runs a `SELECT` whose FROM clause is parseable.
+    @Published private(set) var currentTable: String? = nil
+    @Published var primaryKeyColumn: String? = nil
+
     private let session: ConnectionSession
     weak var toastCenter: ToastCenter?
+    private let historyCapacity = 10
 
     init(session: ConnectionSession) {
         self.session = session
@@ -57,9 +72,61 @@ final class QueryEditorViewModel: ObservableObject {
         pendingDestructiveSQL = nil
     }
 
+    func toggleSafeMode() {
+        safeMode.toggle()
+        toastCenter?.push("Safe Mode \(safeMode ? "ON" : "OFF")", kind: safeMode ? .success : .warning)
+    }
+
+    func formatSQL() {
+        sql = SQLFormatter.format(sql)
+        toastCenter?.push("Formatted", kind: .info)
+    }
+
+    func loadHistory(at index: Int) {
+        guard index >= 0, index < history.count else { return }
+        let entry = history[index]
+        sql = entry.sql
+        result = entry.result
+        errorMessage = nil
+        historyIndex = index
+    }
+
+    // MARK: - Mutations commit
+
+    func commitMutations() {
+        let statements = mutationsQueue.compileSQL(quoting: session.config.kind == .mysql ? .backtick : .doubleQuote)
+        guard !statements.isEmpty else { return }
+        let driver = session.driver
+        Task { [weak self] in
+            for stmt in statements {
+                do {
+                    _ = try await driver.executeQuery(stmt)
+                } catch {
+                    await MainActor.run {
+                        self?.toastCenter?.error(error)
+                    }
+                    return
+                }
+            }
+            await MainActor.run {
+                self?.mutationsQueue.clear()
+                self?.toastCenter?.push("\(statements.count) edit\(statements.count == 1 ? "" : "s") committed", kind: .success)
+            }
+        }
+    }
+
+    func discardMutations() {
+        mutationsQueue.clear()
+        toastCenter?.push("Discarded uncommitted edits", kind: .warning)
+    }
+
+    // MARK: - Execution
+
     private func execute(_ sqlToRun: String) {
         isExecuting = true
         errorMessage = nil
+        currentTable = SQLAnalyzer.tableName(in: sqlToRun)
+        primaryKeyColumn = primaryKeyColumn ?? "id"
         let driver = session.driver
         Task { [weak self] in
             do {
@@ -68,6 +135,7 @@ final class QueryEditorViewModel: ObservableObject {
                     guard let self = self else { return }
                     self.result = r
                     self.isExecuting = false
+                    self.recordHistory(sql: sqlToRun, result: r)
                     let ms = Int(r.executionTime * 1000)
                     self.toastCenter?.push("Executed in \(ms) ms · \(r.rows.count) rows", kind: .success)
                 }
@@ -82,9 +150,25 @@ final class QueryEditorViewModel: ObservableObject {
         }
     }
 
+    private func recordHistory(sql: String, result: QueryResult) {
+        let entry = QueryHistoryEntry(sql: sql, result: result, executedAt: Date())
+        history.append(entry)
+        if history.count > historyCapacity {
+            history.removeFirst(history.count - historyCapacity)
+        }
+        historyIndex = history.count - 1
+    }
+
     private func isDestructive(_ sql: String) -> Bool {
         let upper = sql.uppercased()
         let prefixes = ["UPDATE ", "DELETE ", "DROP ", "TRUNCATE ", "ALTER ", "INSERT "]
         return prefixes.contains { upper.hasPrefix($0) }
     }
+}
+
+struct QueryHistoryEntry: Hashable, Identifiable {
+    let id = UUID()
+    let sql: String
+    let result: QueryResult
+    let executedAt: Date
 }
