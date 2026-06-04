@@ -27,6 +27,9 @@ struct WorkspaceView: View {
             }
         }
         .background(.ultraThinMaterial)
+        .onReceive(NotificationCenter.default.publisher(for: .switchWorkspaceTab)) { note in
+            if let raw = note.object as? String { selectedTab = raw }
+        }
     }
 
     @ViewBuilder
@@ -37,6 +40,8 @@ struct WorkspaceView: View {
             switch WorkspaceTab(rawValue: selectedTab) ?? .editor {
             case .editor:    SQLEditorContainerView(session: session)
             case .dashboard: DashboardView(session: session)
+            case .erd:       ERDCanvasView(session: session)
+            case .diff:      SchemaDiffView(session: session)
             }
         }
     }
@@ -65,4 +70,4 @@ struct WorkspaceView: View {
     }
 }
 
-enum WorkspaceTab: String { case editor, dashboard }
+enum WorkspaceTab: String { case editor, dashboard, erd, diff }

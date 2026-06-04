@@ -23,6 +23,8 @@ struct WorkspaceTabBar: View {
             Spacer()
             tabButton(.editor, label: "Editor", icon: "terminal.fill")
             tabButton(.dashboard, label: "Dashboard", icon: "chart.line.uptrend.xyaxis")
+            tabButton(.erd, label: "ERD", icon: "rectangle.connected.to.line.below")
+            tabButton(.diff, label: "Diff", icon: "rectangle.split.2x1")
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
