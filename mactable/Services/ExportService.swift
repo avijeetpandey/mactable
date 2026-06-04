@@ -28,6 +28,19 @@ enum ExportService {
         return "{ \(pairs.joined(separator: ", ")) }"
     }
 
+    /// Backwards-compatible alias used by the new context menu.
+    static func toJSONObject(row: QueryRow, columns: [ColumnDescriptor]) -> String {
+        toJSON(row, columns: columns)
+    }
+
+    /// Compile a single row into a parameterised INSERT statement suitable
+    /// for re-running against the same table.
+    static func toInsertSQL(row: QueryRow, columns: [ColumnDescriptor], table: String) -> String {
+        let cols = columns.map { "\"\($0.name)\"" }.joined(separator: ", ")
+        let vals = zip(row.values, columns).map { value, _ in SQLLiteralFormatter.format(value) }.joined(separator: ", ")
+        return "INSERT INTO \"\(table)\" (\(cols)) VALUES (\(vals));"
+    }
+
     static func toSQLDump(tableName: String, result: QueryResult) -> String {
         var lines: [String] = []
         let cols = result.columns.map { "\"\($0.name)\"" }.joined(separator: ", ")
