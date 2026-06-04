@@ -9,13 +9,18 @@ import AppKit
 struct ResultsTableView: View {
     let result: QueryResult
     let errorMessage: String?
+    let tableName: String?
+    let primaryKeyColumn: String?
+    @ObservedObject var mutationsQueue: MutationsQueue
+    let onCommit: () -> Void
+    let onDiscard: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Text(result.isEmpty ? "Results" : "\(result.rows.count) rows · \(result.columns.count) columns")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(AppTypography.metadata(11).weight(.semibold))
+                    .foregroundStyle(AppTheme.secondaryLabel)
                 Spacer()
                 if !result.rows.isEmpty {
                     Button {
@@ -35,7 +40,23 @@ struct ResultsTableView: View {
                 EmptyStateView(symbol: "tray.fill", title: "No Results",
                                message: "Run a query to view results.")
             } else {
-                VirtualizedDataGridView(result: result)
+                ZStack(alignment: .bottom) {
+                    VirtualizedDataGridView(
+                        result: result,
+                        tableName: tableName,
+                        mutationsQueue: mutationsQueue,
+                        primaryKeyColumn: primaryKeyColumn
+                    )
+                    if !mutationsQueue.isEmpty {
+                        PendingCommitBarView(
+                            queue: mutationsQueue,
+                            onCommit: onCommit,
+                            onDiscard: onDiscard
+                        )
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .animation(.spring(response: 0.35, dampingFraction: 0.73), value: mutationsQueue.isEmpty)
             }
         }
     }
